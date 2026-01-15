@@ -35,6 +35,7 @@ class AnyTrainer:
         self.max_grad_norm = None
         self.accelerator = None
         self.mixed_precision = "no"
+        self.weight_dtype = torch.float32
 
     def init(self):
         time_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -46,11 +47,11 @@ class AnyTrainer:
             project_config=accelerator_project_config
         )
 
-        weight_dtype = torch.float32
+        self.weight_dtype = torch.float32
         if self.accelerator.mixed_precision == "fp16":
-            weight_dtype = torch.float16
+            self.weight_dtype = torch.float16
         elif self.accelerator.mixed_precision == "bf16":
-            weight_dtype = torch.bfloat16
+            self.weight_dtype = torch.bfloat16
 
         logging.basicConfig(
             format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
@@ -82,7 +83,7 @@ class AnyTrainer:
                 if param.requires_grad:
                     param.data = param.to(dtype=torch.float32)
                 else:
-                    param.data = param.to(dtype=weight_dtype)
+                    param.data = param.to(dtype=self.weight_dtype)
 
             model.train()
             self.models[i] = self.accelerator.prepare(model)
@@ -150,12 +151,6 @@ class AnyTrainer:
         if self.batch_size is None or self.epochs is None or self.optimizer is None or self.train_dataloader is None or self.gradient_accumulation_steps is None:
             raise ValueError("Trainer not properly initialized. Please call init() before training.")
         
-        weight_dtype = torch.float32
-        if self.accelerator.mixed_precision == "fp16":
-            weight_dtype = torch.float16
-        elif self.accelerator.mixed_precision == "bf16":
-            weight_dtype = torch.bfloat16
-
         dataset_size = len(self.train_dataloader.dataset)
         effective_batch_size = self.batch_size * self.gradient_accumulation_steps
         total_steps = (dataset_size // effective_batch_size) * self.epochs
@@ -171,7 +166,7 @@ class AnyTrainer:
         self.accelerator.print(f" Total Training Steps: {total_steps}\n")
 
         for model in self.non_trainable_models:
-            model.to(self.accelerator.device, dtype=weight_dtype)
+            model.to(self.accelerator.device, dtype=self.weight_dtype)
             model.eval()
         
         if self.accelerator.is_main_process:
@@ -205,7 +200,7 @@ class AnyTrainer:
             for step, batch in enumerate(active_dataloader, start=starting_step):
                 accumulate_context = self.accelerator.accumulate(self.models)
                 with accumulate_context:
-                    loss, loss_dict = self.train_step(self.global_step, batch, device=self.accelerator.device, weight_dtype=weight_dtype)
+                    loss, loss_dict = self.train_step(self.global_step, batch, device=self.accelerator.device, weight_dtype=self.weight_dtype)
                     merged_loss_dict = loss_dict
                     merged_loss_dict["loss"] = loss
 
@@ -306,7 +301,7 @@ class AnyTrainer:
 
                                 with torch.no_grad():
                                     for eval_batch in self.eval_dataloader:
-                                        eval_loss, eval_loss_dict = self.eval_step(self.global_step, eval_batch, device=self.accelerator.device, weight_dtype=weight_dtype)
+                                        eval_loss, eval_loss_dict = self.eval_step(self.global_step, eval_batch, device=self.accelerator.device, weight_dtype=self.weight_dtype)
                                         merged_eval_loss_dict = eval_loss_dict
                                         if eval_loss is not None:
                                             merged_eval_loss_dict["loss"] = eval_loss
