@@ -226,10 +226,7 @@ class AnyTrainer:
                                 if p.grad is not None:
                                     all_params.append(p)
                         if all_params:
-                            grad_norm = torch.nn.utils.clip_grad_norm_(all_params, float('inf')).item()
-                        
-                        if self.max_grad_norm is not None:
-                            self.accelerator.clip_grad_norm_(all_params, self.max_grad_norm)
+                            grad_norm = self.accelerator.clip_grad_norm_(all_params, float('inf') if self.max_grad_norm is None else self.max_grad_norm)
                     
                     self.optimizer.step()
                     if self.accelerator.sync_gradients and self.scheduler is not None:
