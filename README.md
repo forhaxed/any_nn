@@ -12,6 +12,7 @@ A lightweight PyTorch training utility library featuring EMA (Exponential Moving
   - TensorBoard logging
   - Evaluation during training
   - Multi-GPU training via Accelerate
+  - Lock file support for pausing, saving, and evaluating
 
 ## Installation
 
@@ -114,47 +115,6 @@ trainer.load_state("./output/checkpoints/step_1000")
 # Continue training
 trainer.train()
 ```
-
-## API Reference
-
-### AnyEMA
-
-| Method | Description |
-|--------|-------------|
-| `__init__(named_parameters, scale=1.0, capture=[])` | Initialize EMA with model parameters |
-| `update(named_parameters, decay=0.999)` | Update EMA parameters |
-| `swap(named_parameters)` | Swap model parameters with EMA parameters |
-
-### AnyTrainer
-
-| Attribute | Description |
-|-----------|-------------|
-| `output_dir` | Directory for outputs and checkpoints |
-| `models` | List of trainable models |
-| `non_trainable_models` | List of models used but not trained |
-| `optimizer` | PyTorch optimizer |
-| `scheduler` | Learning rate scheduler (optional) |
-| `train_dataloader` | Training data loader |
-| `eval_dataloader` | Evaluation data loader (optional) |
-| `batch_size` | Batch size |
-| `epochs` | Number of training epochs |
-| `gradient_accumulation_steps` | Gradient accumulation steps |
-| `mixed_precision` | Mixed precision mode ("no", "fp16", "bf16") |
-| `save_checkpoint_every_steps` | Checkpoint saving frequency |
-| `eval_every_steps` | Evaluation frequency |
-| `max_grad_norm` | Maximum gradient norm for clipping |
-
-| Method | Description |
-|--------|-------------|
-| `init()` | Initialize the trainer |
-| `train()` | Start training loop |
-| `train_step(step, batch, device, weight_dtype)` | Override to define training step |
-| `eval_step(step, batch, device, weight_dtype)` | Override to define evaluation step |
-| `eval_begin(step)` | Called before evaluation |
-| `eval_end(step)` | Called after evaluation |
-| `gradient_sync(step)` | Called after gradient synchronization |
-| `save_state(directory)` | Save trainer state to directory |
-| `load_state(directory)` | Load trainer state from directory |
 
 ## License
 

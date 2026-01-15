@@ -12,6 +12,7 @@ from accelerate.utils import ProjectConfiguration, set_seed
 import os
 import logging
 import torch
+import time
 
 class AnyTrainer:
     def __init__(self, output_dir: str = "./output"):
@@ -243,12 +244,28 @@ class AnyTrainer:
                     train_loss_accs = {}
 
                     if self.accelerator.is_main_process:
-                        if self.save_checkpoint_every_steps > 0 and self.global_step % self.save_checkpoint_every_steps == 0:
+                        should_save_checkpoint_file = os.path.join(self.output_dir, "save_checkpoint.lock")
+                        if os.path.isfile(should_save_checkpoint_file):
+                            os.remove(should_save_checkpoint_file)
+                            should_save_checkpoint_file = True
+                            print(f"Detected save checkpoint lock file. Saving checkpoint at step {self.global_step}...")
+                        else:
+                            should_save_checkpoint_file = False
+
+                        should_eval_file = os.path.join(self.output_dir, "do_eval.lock")
+                        if os.path.isfile(should_eval_file):
+                            os.remove(should_eval_file)
+                            should_eval_file = True
+                            print(f"Detected do eval lock file. Running evaluation at step {self.global_step}...")
+                        else:
+                            should_eval_file = False
+
+                        if should_save_checkpoint_file or (self.save_checkpoint_every_steps > 0 and self.global_step % self.save_checkpoint_every_steps == 0):
                             checkpoint_dir = os.path.join(self.output_dir, "checkpoints", f"step_{self.global_step}")
                             self.save_state(checkpoint_dir)
                             self.accelerator.print(f"Saved checkpoint to {checkpoint_dir}")
 
-                        if self.eval_every_steps > 0 and self.global_step % self.eval_every_steps == 0:
+                        if should_eval_file or (self.eval_every_steps > 0 and self.global_step % self.eval_every_steps == 0):
                             self.eval_begin(self.global_step)
 
                             if self.eval_dataloader is not None:
@@ -297,6 +314,50 @@ class AnyTrainer:
                     self.steps_in_epoch += 1
                     self.global_step += 1
 
+                    pause_file = os.path.join(self.output_dir, "pause.lock")
+
+                    should_pause = torch.tensor(
+                        [1 if (self.accelerator.is_main_process and os.path.isfile(pause_file)) else 0],
+                        device="cpu"
+                    )
+                    should_pause = self.accelerator.reduce(should_pause, reduction="sum").item() > 0
+
+                    if should_pause:
+                        self.accelerator.wait_for_everyone()
+
+                        self.accelerator.print(f"{Fore.YELLOW}Pausing training at step {self.global_step} due to presence of pause.lock file.{Style.RESET_ALL}")
+                        
+                        for model in self.models:
+                            model.to("cpu")
+                        
+                        for model in self.non_trainable_models:
+                            model.to("cpu")
+
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+
+                        while True:
+                            self.accelerator.wait_for_everyone()
+                            
+                            still_paused = torch.tensor(
+                                [1 if (self.accelerator.is_main_process and os.path.isfile(pause_file)) else 0],
+                                device="cpu"
+                            )
+                            still_paused = self.accelerator.reduce(still_paused, reduction="sum").item() > 0
+                            
+                            if not still_paused:
+                                break
+                            time.sleep(1.0)
+
+                        self.accelerator.print(f"{Fore.GREEN}Resuming training at step {self.global_step}.{Style.RESET_ALL}")
+                        
+                        for model in self.models:
+                            model.to(self.accelerator.device)
+
+                        for model in self.non_trainable_models:
+                            model.to(self.accelerator.device)
+
+                        self.accelerator.wait_for_everyone()
 
             self.steps_in_epoch = 0  # Reset for next epoch
             self.epochs_trained += 1
