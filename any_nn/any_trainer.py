@@ -309,7 +309,7 @@ class AnyTrainer:
 
                                 with torch.no_grad():
                                     for eval_batch in self.eval_dataloader:
-                                        eval_loss, eval_loss_dict = self.eval_step(num_eval_steps, eval_batch, device=self.accelerator.device, weight_dtype=weight_dtype)
+                                        eval_loss, eval_loss_dict = self.eval_step(self.global_step, eval_batch, device=self.accelerator.device, weight_dtype=weight_dtype)
                                         merged_eval_loss_dict = eval_loss_dict
                                         if eval_loss is not None:
                                             merged_eval_loss_dict["loss"] = eval_loss
