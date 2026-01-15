@@ -46,6 +46,12 @@ class AnyTrainer:
             project_config=accelerator_project_config
         )
 
+        weight_dtype = torch.float32
+        if self.accelerator.mixed_precision == "fp16":
+            weight_dtype = torch.float16
+        elif self.accelerator.mixed_precision == "bf16":
+            weight_dtype = torch.bfloat16
+
         logging.basicConfig(
             format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
             datefmt="%m/%d/%Y %H:%M:%S",
@@ -71,7 +77,13 @@ class AnyTrainer:
                 os.makedirs(self.output_dir, exist_ok=True)
 
         for i, model in enumerate(self.models):
-            model.to(self.accelerator.device, dtype=torch.float32)
+            model.to(self.accelerator.device)
+            for param in model.parameters():
+                if param.requires_grad:
+                    param.data = param.to(dtype=torch.float32)
+                else:
+                    param.data = param.to(dtype=weight_dtype)
+
             model.train()
             self.models[i] = self.accelerator.prepare(model)
 
@@ -299,12 +311,13 @@ class AnyTrainer:
                                     for eval_batch in self.eval_dataloader:
                                         eval_loss, eval_loss_dict = self.eval_step(num_eval_steps, eval_batch, device=self.accelerator.device, weight_dtype=weight_dtype)
                                         merged_eval_loss_dict = eval_loss_dict
-                                        merged_eval_loss_dict["loss"] = eval_loss
+                                        if eval_loss is not None:
+                                            merged_eval_loss_dict["loss"] = eval_loss
 
                                         for key, value in merged_eval_loss_dict.items():
                                             if key not in eval_loss_accs:
                                                 eval_loss_accs[key] = 0.0
-                                            eval_loss_accs[key] += value.item()
+                                            eval_loss_accs[key] += value.item() if isinstance(value, torch.Tensor) else value
 
                                         num_eval_steps += 1
                                 
