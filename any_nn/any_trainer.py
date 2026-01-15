@@ -237,6 +237,20 @@ class AnyTrainer:
                     if grad_norm is not None:
                         log_dict["train/grad_norm"] = grad_norm
 
+                    # Calculate average magnitude of parameters for each model
+                    for model_idx, model in enumerate(self.models):
+                        unwrapped_model = self.accelerator.unwrap_model(model)
+                        total_magnitude = 0.0
+                        total_params = 0
+                        for param in unwrapped_model.parameters():
+                            if param.requires_grad:
+                                total_magnitude += param.data.abs().sum().item()
+                                total_params += param.numel()
+                        if total_params > 0:
+                            avg_magnitude = total_magnitude / total_params
+                            model_name = unwrapped_model.__class__.__name__
+                            log_dict[f"train/avg_magnitude/{model_name}"] = avg_magnitude
+
                     for key, value in train_loss_accs.items():
                         log_dict[f"train/{key}"] = value
 
