@@ -383,3 +383,8 @@ class AnyTrainer:
 
         self.accelerator.wait_for_everyone()
         self.accelerator.end_training()
+
+        if self.accelerator.is_main_process:
+            self.accelerator.print(f"{Fore.GREEN}Training complete!{Style.RESET_ALL}\n")
+            checkpoint_dir = os.path.join(self.output_dir, "checkpoints", f"step_{self.global_step}_final")
+            self.save_state(checkpoint_dir)
