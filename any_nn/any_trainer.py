@@ -4,6 +4,7 @@ Helper class for train any model.
 
 from datetime import datetime
 import json
+import random
 from colorama import Fore, Style
 from tqdm.auto import tqdm
 from accelerate import Accelerator
@@ -26,6 +27,9 @@ class AnyTrainer:
         self.eval_dataloader = None
         self.models = []
         self.non_trainable_models = []
+
+        self.repeats = 1
+        self.precache_size = 0
 
         self.global_step = 0
         self.epochs_trained = 0
@@ -147,13 +151,41 @@ class AnyTrainer:
     def gradient_sync(self, step):
         pass
 
+    def precache_dataset(self, batch_list, device, weight_dtype):
+        return batch_list
+
+    def _iterate_batches(self, dataloader):
+        if self.precache_size > 0:
+            buffer = []
+            for batch in dataloader:
+                batch["batch_hash"] = random.randint(0, 2**63)
+                buffer.append(batch)
+                if len(buffer) >= self.precache_size:
+                    with torch.no_grad():
+                        buffer = self.precache_dataset(buffer, self.accelerator.device, self.weight_dtype)
+                    for b in buffer:
+                        for _ in range(self.repeats):
+                            yield b
+                    buffer = []
+            if buffer != []:
+                with torch.no_grad():
+                    buffer = self.precache_dataset(buffer, self.accelerator.device, self.weight_dtype)
+                for b in buffer:
+                    for _ in range(self.repeats):
+                        yield b
+        else:
+            for batch in dataloader:
+                batch["batch_hash"] = random.randint(0, 2**63)
+                for _ in range(self.repeats):
+                    yield batch
+
     def train(self):
         if self.batch_size is None or self.epochs is None or self.optimizer is None or self.train_dataloader is None or self.gradient_accumulation_steps is None:
             raise ValueError("Trainer not properly initialized. Please call init() before training.")
         
         dataset_size = len(self.train_dataloader.dataset)
         effective_batch_size = self.batch_size * self.gradient_accumulation_steps
-        total_steps = (dataset_size // effective_batch_size) * self.epochs
+        total_steps = (dataset_size // effective_batch_size) * self.epochs * self.repeats
 
         self.accelerator.print(f"\n{Fore.BLUE}Training Configuration:{Style.RESET_ALL}")
         self.accelerator.print(f" Device: {self.accelerator.device}")
@@ -163,6 +195,8 @@ class AnyTrainer:
         self.accelerator.print(f" Batch Size: {self.batch_size}")
         self.accelerator.print(f" Gradient Accumulation Steps: {self.gradient_accumulation_steps}")
         self.accelerator.print(f" Effective Batch Size: {effective_batch_size}")
+        self.accelerator.print(f" Repeats: {self.repeats}")
+        self.accelerator.print(f" Precache Size: {self.precache_size}")
         self.accelerator.print(f" Total Training Steps: {total_steps}\n")
 
         for model in self.non_trainable_models:
@@ -191,13 +225,14 @@ class AnyTrainer:
 
             # Skip already processed batches when resuming mid-epoch
             if self.steps_in_epoch > 0:
-                active_dataloader = skip_first_batches(self.train_dataloader, self.steps_in_epoch * self.gradient_accumulation_steps)
+                batches_to_skip = (self.steps_in_epoch * self.gradient_accumulation_steps) // self.repeats
+                active_dataloader = skip_first_batches(self.train_dataloader, batches_to_skip)
                 starting_step = self.steps_in_epoch * self.gradient_accumulation_steps
             else:
                 active_dataloader = self.train_dataloader
                 starting_step = 0
             
-            for step, batch in enumerate(active_dataloader, start=starting_step):
+            for step, batch in enumerate(self._iterate_batches(active_dataloader), start=starting_step):
                 accumulate_context = self.accelerator.accumulate(self.models)
                 with accumulate_context:
                     loss, loss_dict = self.train_step(self.global_step, batch, device=self.accelerator.device, weight_dtype=self.weight_dtype)
