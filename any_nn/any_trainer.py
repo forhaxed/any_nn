@@ -28,6 +28,8 @@ class AnyTrainer:
         self.models = []
         self.non_trainable_models = []
 
+        self.allow_skip_batches_on_resume = True
+
         self.repeats = 1
         self.precache_size = 0
 
@@ -224,7 +226,7 @@ class AnyTrainer:
             train_loss_accs = {}
 
             # Skip already processed batches when resuming mid-epoch
-            if self.steps_in_epoch > 0:
+            if self.steps_in_epoch > 0 and self.allow_skip_batches_on_resume:
                 batches_to_skip = (self.steps_in_epoch * self.gradient_accumulation_steps) // self.repeats
                 active_dataloader = skip_first_batches(self.train_dataloader, batches_to_skip)
                 starting_step = self.steps_in_epoch * self.gradient_accumulation_steps
